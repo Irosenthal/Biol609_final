@@ -1,0 +1,208 @@
+---
+title: "Urbanization and Kelp Coverage in Southern Californa"
+author: "Isaac Rosenthal"
+date: "5/10/2017"
+css: style.css
+output:
+  revealjs::revealjs_presentation:
+    reveal_options:
+      slideNumber: true
+      previewLinks: true
+    theme: solarized  
+    center: false
+    transition: fade
+    self_contained: false
+    lib_dir: libs
+    
+    
+
+---
+```{r set-options, echo=FALSE, cache=FALSE}
+options(width = 150)
+```
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+library(rethinking)
+library(png)
+library(grid)
+library(rstan)
+library(ggplot2)
+library(brms)
+library(sp)
+library(ggmap)
+library(dplyr)
+library(tidyr)
+```
+
+
+
+---
+
+**The System**  
+
+-Landsat images of California coast, from 1984 - 2011
+
+-Reduced to Santa Barbara, San Diego, and Los Angeles (and a non-urban control for each)  
+
+![](C:/Users/irose/OneDrive/UMB/609/final/kelp.JPG){width="50%"}
+
+
+---
+
+**What is the effect of urbanization on kelp coverage at different sites?**  
+
+![](C:/Users/irose/OneDrive/UMB/609/final/auto.JPG){width="80%"}
+
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+
+#img1 <- readPNG("C:/Users/irose/OneDrive/UMB/609/final/auto.PNG")
+#grid.raster(img1)
+
+```
+
+---
+
+**The data**
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+kelp <- read.csv("./kelp_clean.csv")
+```
+
+
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+ac <- lm(percent_coverage ~ time_point, data = kelp)
+acf(residuals(ac))
+```
+
+---
+
+
+**The Models**
+
+
+
+A simple model
+
+``` {r,echo = TRUE, cache=TRUE, results = "hide", message= FALSE, warning=FALSE}
+kelp_brm <- brm(percent_coverage ~ site, data=kelp, chains=2, 
+                cores = 2, iter = 10000,
+                autocor = cor_ar(~time_point | site))
+```
+
+And a more complex one.
+``` {r,echo = TRUE, cache=TRUE, results = "HIDE", message=FALSE, warning=FALSE}
+kelp_brm_qtr_2 <- brm(percent_coverage ~ site + qtr, data=kelp, chains=2,
+                      cores = 2, iter = 10000,
+                      autocor = cor_ar(~time_point | site))
+```
+
+
+##
+
+**Compare the models**
+
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=FALSE, message=FALSE, warning=FALSE)
+summary(kelp_brm_qtr_2, waic = TRUE)
+summary(kelp_brm, waic = TRUE)
+```
+
+##
+
+**Inspect the chains!**
+
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+plot(kelp_brm_qtr_2)
+```
+
+##
+
+**Check out the pairs plot**  
+
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+
+pairs(kelp_brm_qtr_2)
+```
+
+
+##
+
+Use `ppcheck()` to compare my data to simulated posterior distributions
+``` {r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+pp_check(kelp_brm_qtr_2, nsamples = 100)
+```
+
+Not great. My data looks like it might not be normally distributed.
+
+##
+
+
+
+Lets see how well the model predicted each site.
+Use `fitted()` to get fitted values from the model. 
+```{r,echo = TRUE}
+preds_qtr2 <- as.data.frame(fitted(kelp_brm_qtr_2, allow_new_levels = TRUE, probs = c(0.05, 0.95)))
+```
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+preds_qtr2 <- preds_qtr2 %>%
+  mutate(site = kelp$site) %>%
+  mutate(time_point = kelp$time_point)
+```
+And see how they line up with the data.
+
+```{r,fig.width=6, fig.height=4}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+ggplot(data = kelp)  +
+  geom_line(data = kelp, mapping = aes(x = time_point, y = percent_coverage), color = "red") + 
+  geom_line(data = preds_qtr2, mapping= aes(x = time_point, y = Estimate), color = "blue") +
+  theme(legend.position = "right") +
+  facet_wrap(~site) 
+```
+
+##
+
+In BRMS, we can extract samples with `posterior_samples()`
+```{r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+samps <- posterior_samples(kelp_brm_qtr_2)
+```
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+banova_df <- data.frame(SB = samps$b_siteSB,
+                        SB_control = samps$b_siteSB_control,
+                        SD = samps$b_siteSD,
+                        SD_control = samps$b_siteSD_control,
+                        LA = samps$b_Intercept,
+                        LA_control = samps$b_siteLA_control) %>%
+  gather(site, value)
+```
+
+And with a little under-the-hood data wrangling we can look at sample draws for each treatment, with their means.
+```{r,fig.width=6, fig.height=4}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message=FALSE, warning=FALSE)
+ggplot(banova_df, aes(x =site, y = value)) +
+  geom_point() +
+  stat_summary(fun.data = "mean_sdl", color = "red")+
+  coord_flip()
+```
+
+##  
+
+*Questions?* 
+
+
+![](C:/Users/irose/OneDrive/UMB/609/final/auto2.JPG){width="80%"}
+
+
+
+
+
